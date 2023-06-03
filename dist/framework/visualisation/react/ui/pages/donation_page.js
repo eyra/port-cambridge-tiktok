@@ -20,14 +20,11 @@ import { ConsentForm } from '../prompts/consent_form';
 import { FileInput } from '../prompts/file_input';
 import { RadioInput } from '../prompts/radio_input';
 import { Footer } from './templates/footer';
-import { Sidebar } from './templates/sidebar';
-import LogoSvg from '../../../../../assets/images/logo.svg';
 import { Page } from './templates/page';
 import { Progress } from '../elements/progress';
-import { Instructions } from '../elements/instructions';
 export var DonationPage = function (props) {
     var _a = prepareCopy(props), title = _a.title, forwardButton = _a.forwardButton;
-    var platform = props.platform, locale = props.locale, resolve = props.resolve;
+    var locale = props.locale, resolve = props.resolve;
     function renderBody(props) {
         var context = { locale: locale, resolve: props.resolve };
         var body = props.body;
@@ -49,7 +46,14 @@ export var DonationPage = function (props) {
         resolve === null || resolve === void 0 ? void 0 : resolve({ __type__: 'PayloadFalse', value: false });
     }
     var footer = (_jsx(Footer, { middle: _jsx(Progress, { percentage: props.footer.progressPercentage }), right: _jsxs("div", __assign({ className: 'flex flex-row' }, { children: [_jsx("div", { className: 'flex-grow' }), _jsx(ForwardButton, { label: forwardButton, onClick: handleSkip })] })) }));
-    var sidebar = (_jsx(Sidebar, { logo: LogoSvg, content: _jsx(Instructions, { platform: platform, locale: locale }) }));
+    var sidebar = (_jsx("div", {})
+    // <Sidebar
+    //   logo={LogoSvg}
+    //   content={
+    //     <Instructions platform={platform} locale={locale} />
+    //   }
+    // />
+    );
     var body = (_jsxs(_Fragment, { children: [_jsx(Title1, { text: title }), renderBody(props)] }));
     return (_jsx(Page, { body: body, sidebar: sidebar, footer: footer }));
 };
