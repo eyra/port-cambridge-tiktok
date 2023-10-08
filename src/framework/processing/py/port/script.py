@@ -132,7 +132,7 @@ def load_tiktok_data(json_file):
     return data
 
 
-def get_json_data(zip_file):
+def get_json_data_from_zip(zip_file):
     with zipfile.ZipFile(zip_file, "r") as zip:
         for name in zip.namelist():
             if not name.endswith(".json"):
@@ -141,6 +141,14 @@ def get_json_data(zip_file):
                 with suppress(IOError, json.JSONDecodeError):
                     return [load_tiktok_data(json_file)]
     return []
+
+def get_json_data_from_file(file_):
+    # TikTok exports can be a single JSON file or a zipped JSON file
+    try:
+        with open(file_) as f:
+            return [load_tiktok_data(f)]
+    except (json.decoder.JSONDecodeError, UnicodeDecodeError):
+        return get_json_data_from_zip(file_)
 
 
 def filtered_count(data, *key_path):
@@ -400,8 +408,7 @@ def extract_tiktok_data(zip_file):
         extract_comment_activity,
         extract_videos_liked,
     ]
-    for data in get_json_data(zip_file):
-        print(repr(data))
+    for data in get_json_data_from_file(zip_file):
         return [
             table
             for table in (extractor(data) for extractor in extractors)
@@ -413,8 +420,10 @@ def extract_tiktok_data(zip_file):
 # Data donation flow #
 ######################
 
-
 ExtractionResult = namedtuple("ExtractionResult", ["id", "title", "data_frame"])
+
+class InvalidFileError(Exception):
+    """Indicates that the file does not match expectations."""
 
 
 class SkipToNextStep(Exception):
@@ -431,20 +440,23 @@ class DataDonationProcessor:
         self.meta_data = []
 
     def process(self):
-        print("START")
         with suppress(SkipToNextStep):
             while True:
                 file_result = yield from self.prompt_file()
 
                 self.log(f"extracting file")
                 try:
-                    print(file_result)
                     extraction_result = self.extract_data(file_result.value)
                 except IOError as e:
-                    print("IOERROR")
                     self.log(f"prompt confirmation to retry file selection")
                     yield from self.prompt_retry()
                     return
+                except InvalidFileError:
+                    self.log(f"invalid file detected, prompting for retry")
+                    if (yield from self.prompt_retry()):
+                        continue
+                    else:
+                        return
                 else:
                     if extraction_result is None:
                         try_again = yield from self.prompt_retry()
@@ -520,7 +532,7 @@ class DataDonation:
 
 
 tik_tok_data_donation = DataDonation(
-    "TikTok", "application/zip, text/plain", extract_tiktok_data
+    "TikTok", "application/zip, text/plain, application/json", extract_tiktok_data
 )
 
 
@@ -547,8 +559,8 @@ def render_donation_page(platform, body, progress):
 def retry_confirmation(platform):
     text = props.Translatable(
         {
-            "en": f"Unfortunately, we cannot process your {platform} file. Continue, if you are sure that you selected the right file. Try again to select a different file.",
-            "nl": f"Helaas, kunnen we uw {platform} bestand niet verwerken. Weet u zeker dat u het juiste bestand heeft gekozen? Ga dan verder. Probeer opnieuw als u een ander bestand wilt kiezen.",
+            "en": "Unfortunately, we cannot process your data. Please make sure that you selected JSON as a file format when downloading your data from TikTok.",
+            "nl": "Helaas kunnen we uw gegevens niet verwerken. Zorg ervoor dat u JSON heeft geselecteerd als bestandsformaat bij het downloaden van uw gegevens van TikTok.",
         }
     )
     ok = props.Translatable({"en": "Try again", "nl": "Probeer opnieuw"})
