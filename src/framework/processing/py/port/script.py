@@ -13,10 +13,16 @@ from contextlib import suppress
 # TikTok file processing #
 ##########################
 
-filter_start = datetime.datetime(2021, 1, 1)
-filter_end = datetime.datetime(2025, 1, 1)
+now = datetime.datetime.utcnow()
 
 datetime_format = "%Y-%m-%d %H:%M:%S"
+
+# Use functions for the start and end so that they can be patched during test
+def get_filter_start():
+    return now - datetime.timedelta(days=7)
+
+def get_filter_end():
+    return now
 
 
 def parse_datetime(value):
@@ -70,7 +76,7 @@ def get_comment_list_data(data):
 def get_date_filtered_items(items):
     for item in items:
         timestamp = parse_datetime(item["Date"])
-        if timestamp < filter_start or timestamp > filter_end:
+        if timestamp <= get_filter_start() or timestamp >= get_filter_end():
             continue
         yield (timestamp, item)
 
@@ -132,7 +138,7 @@ def load_tiktok_data(json_file):
     return data
 
 
-def get_json_data(zip_file):
+def get_json_data_from_zip(zip_file):
     with zipfile.ZipFile(zip_file, "r") as zip:
         for name in zip.namelist():
             if not name.endswith(".json"):
@@ -141,6 +147,14 @@ def get_json_data(zip_file):
                 with suppress(IOError, json.JSONDecodeError):
                     return [load_tiktok_data(json_file)]
     return []
+
+def get_json_data_from_file(file_):
+    # TikTok exports can be a single JSON file or a zipped JSON file
+    try:
+        with open(file_) as f:
+            return [load_tiktok_data(f)]
+    except (json.decoder.JSONDecodeError, UnicodeDecodeError):
+        return get_json_data_from_zip(file_)
 
 
 def filtered_count(data, *key_path):
@@ -174,6 +188,15 @@ def exclude_by_key(items, key, value):
 
 def map_to_timeslot(series):
     return series.map(lambda hour: f"{hour}-{hour+1}")
+
+def filter_dataframe_by_date(df, column=None):
+    if column is not None:
+        df= df[(df[column] >= get_filter_start()) & (df[column] <= get_filter_end())]
+        df[column] = pd.to_datetime(df[column])
+        return df
+    df = df.loc[get_filter_start():get_filter_end()]
+    df.index = pd.to_datetime(df.index)
+    return df
 
 
 def extract_summary_data(data):
@@ -244,6 +267,7 @@ def extract_videos_viewed(data):
         return
 
     df = pd.DataFrame(video_counts, columns=["Date", "Videos"])
+    df = filter_dataframe_by_date(df, "Date")
     df["Timeslot"] = map_to_timeslot(df["Date"].dt.hour)
     df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
     df = df.reindex(columns=["Date", "Timeslot", "Videos"])
@@ -266,6 +290,7 @@ def extract_video_posts(data):
         hourly_stats["Likes received"] += int(video["Likes"])
 
     df = pd.DataFrame(post_stats).transpose()
+    df = filter_dataframe_by_date(df)
     df["Date"] = df.index.strftime("%Y-%m-%d")
     df["Timeslot"] = map_to_timeslot(df.index.hour)
     df = df.reset_index(drop=True)
@@ -300,6 +325,7 @@ def extract_comments_and_likes(data):
     )
 
     df = pd.merge(df1, df2, left_on="Date", right_on="Date", how="outer").sort_index()
+    df = filter_dataframe_by_date(df)
     df["Timeslot"] = map_to_timeslot(df.index.hour)
     df["Date"] = df.index.strftime("%Y-%m-%d")
     df = (
@@ -328,8 +354,9 @@ def extract_session_info(data):
 
     sessions = get_sessions(dates)
     df = pd.DataFrame(sessions, columns=["Start", "End", "Duration"])
+    df = filter_dataframe_by_date(df, "Start")
     df["Start"] = df["Start"].dt.strftime("%Y-%m-%d %H:%M")
-    df["Duration (in minutes)"] = (df["Duration"].dt.total_seconds() / 60).round(2)
+    df["Duration (in minutes)"] = (pd.to_timedelta(df["Duration"]).dt.total_seconds() / 60).round(2)
     df = df.drop("End", axis=1)
     df = df.drop("Duration", axis=1)
 
@@ -348,8 +375,11 @@ def extract_direct_messages(data):
     anon_ids[get_user_name(data)]
     table = {"Anonymous ID": [], "Sent": []}
     for item in flatten_chat_history(history):
+        sent = parse_datetime(item["Date"])
+        if sent < get_filter_start() or sent > get_filter_end():
+            continue
         table["Anonymous ID"].append(anon_ids[item["From"]])
-        table["Sent"].append(parse_datetime(item["Date"]).strftime("%Y-%m-%d %H:%M"))
+        table["Sent"].append(sent.strftime("%Y-%m-%d %H:%M"))
 
     return ExtractionResult(
         "tiktok_direct_messages",
@@ -364,7 +394,12 @@ def extract_comment_activity(data):
     comments = get_in(data, "Comment", "Comments", "CommentsList")
     if comments is None:
         return
-    timestamps = [parse_datetime(item["Date"]).strftime("%Y-%m-%d %H:%M") for item in comments]
+    timestamps = []
+    for item in comments:
+        date = parse_datetime(item["Date"])
+        if date < get_filter_start() or date > get_filter_end():
+            continue
+        timestamps.append(date.strftime("%Y-%m-%d %H:%M"))
 
     return ExtractionResult(
         "tiktok_comment_activity",
@@ -379,7 +414,10 @@ def extract_videos_liked(data):
         return
     table = {"Liked": [], "Link": []}
     for item in favorite_videos:
-        table["Liked"].append(parse_datetime(item["Date"]).strftime("%Y-%m-%d %H:%M"))
+        date =parse_datetime(item["Date"])
+        if date < get_filter_start() or date > get_filter_end():
+            continue
+        table["Liked"].append(date.strftime("%Y-%m-%d %H:%M"))
         table["Link"].append(item["Link"])
 
     return ExtractionResult(
@@ -400,8 +438,7 @@ def extract_tiktok_data(zip_file):
         extract_comment_activity,
         extract_videos_liked,
     ]
-    for data in get_json_data(zip_file):
-        print(repr(data))
+    for data in get_json_data_from_file(zip_file):
         return [
             table
             for table in (extractor(data) for extractor in extractors)
@@ -413,8 +450,10 @@ def extract_tiktok_data(zip_file):
 # Data donation flow #
 ######################
 
-
 ExtractionResult = namedtuple("ExtractionResult", ["id", "title", "data_frame"])
+
+class InvalidFileError(Exception):
+    """Indicates that the file does not match expectations."""
 
 
 class SkipToNextStep(Exception):
@@ -431,20 +470,23 @@ class DataDonationProcessor:
         self.meta_data = []
 
     def process(self):
-        print("START")
         with suppress(SkipToNextStep):
             while True:
                 file_result = yield from self.prompt_file()
 
                 self.log(f"extracting file")
                 try:
-                    print(file_result)
                     extraction_result = self.extract_data(file_result.value)
                 except IOError as e:
-                    print("IOERROR")
                     self.log(f"prompt confirmation to retry file selection")
                     yield from self.prompt_retry()
                     return
+                except InvalidFileError:
+                    self.log(f"invalid file detected, prompting for retry")
+                    if (yield from self.prompt_retry()):
+                        continue
+                    else:
+                        return
                 else:
                     if extraction_result is None:
                         try_again = yield from self.prompt_retry()
@@ -520,7 +562,7 @@ class DataDonation:
 
 
 tik_tok_data_donation = DataDonation(
-    "TikTok", "application/zip, text/plain", extract_tiktok_data
+    "TikTok", "application/zip, text/plain, application/json", extract_tiktok_data
 )
 
 
@@ -547,8 +589,8 @@ def render_donation_page(platform, body, progress):
 def retry_confirmation(platform):
     text = props.Translatable(
         {
-            "en": f"Unfortunately, we cannot process your {platform} file. Continue, if you are sure that you selected the right file. Try again to select a different file.",
-            "nl": f"Helaas, kunnen we uw {platform} bestand niet verwerken. Weet u zeker dat u het juiste bestand heeft gekozen? Ga dan verder. Probeer opnieuw als u een ander bestand wilt kiezen.",
+            "en": "Unfortunately, we cannot process your data. Please make sure that you selected JSON as a file format when downloading your data from TikTok.",
+            "nl": "Helaas kunnen we uw gegevens niet verwerken. Zorg ervoor dat u JSON heeft geselecteerd als bestandsformaat bij het downloaden van uw gegevens van TikTok.",
         }
     )
     ok = props.Translatable({"en": "Try again", "nl": "Probeer opnieuw"})
