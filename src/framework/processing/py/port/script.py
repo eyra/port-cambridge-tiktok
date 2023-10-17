@@ -1,384 +1,605 @@
-import logging
-import json
-import io
+import itertools
+import port.api.props as props
+from port.api.commands import CommandSystemDonate, CommandUIRender
 
 import pandas as pd
+import zipfile
+import json
+import datetime
+from collections import defaultdict, namedtuple
+from contextlib import suppress
 
-import port.api.props as props
-import port.helpers as helpers
-import port.unzipddp as unzipddp
-import port.netflix as netflix
+##########################
+# TikTok file processing #
+##########################
 
+filter_start = datetime.datetime(2021, 1, 1)
+filter_end = datetime.datetime(2025, 1, 1)
 
-from port.api.commands import (CommandSystemDonate, CommandUIRender)
-
-LOG_STREAM = io.StringIO()
-
-logging.basicConfig(
-    stream=LOG_STREAM,
-    level=logging.INFO,
-    format="%(asctime)s --- %(name)s --- %(levelname)s --- %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S%z",
-)
-
-LOGGER = logging.getLogger("script")
-
-TABLE_TITLES = {
-    "netflix_ratings": props.Translatable(
-        {
-            "en": "Ratings you gave according to Netlix:",
-            "nl": "Jouw beoordelingen volgens Netflix:",
-        }
-    ),
-}
-
-# Questionnaire questions
-UNDERSTANDING = props.Translatable({
-    "en": "How would you describe the information that you shared with Utrecht University researchers?",
-    "nl": "Open vraag?"
-})
-
-INDENTIFY_CONSUMPTION = props.Translatable({"en": "In case you looked at the data presented on this page, did you recognise your Netflix watching patterns?", "nl": "asd"})
-IDENTIFY_CONSUMPTION_CHOICES = [
-    props.Translatable({"en": "I recognized my Netflix watching patterns", "nl": "asd"}),
-    props.Translatable({"en": "I recognized my Netflix watching patterns and patters of those I share my account with", "nl": "asd"}),
-    props.Translatable({"en": "I recognized mostly the watching patterns of those I share my account with", "nl": "asd"}),
-    props.Translatable({"en": "I did not look at my data ", "nl": "asd"}),
-    props.Translatable({"en": "Other", "nl": "asd"})
-]
-
-ENJOYMENT = props.Translatable({"en": "In case you looked at the data presented on this page, how interesting did you find looking at your data?", "nl": "asd"})
-ENJOYMENT_CHOICES = [
-    props.Translatable({"en": "not at all interesting", "nl": "asd"}),
-    props.Translatable({"en": "somewhat uninteresting", "nl": "asd"}),
-    props.Translatable({"en": "neither interesting nor uninteresting", "nl": "asd"}),
-    props.Translatable({"en": "somewhat interesting", "nl": "asd"}),
-    props.Translatable({"en": "very interesting", "nl": "asd"})
-]
-
-ADDITIONAL_COMMENTS = props.Translatable({
-    "en": "Do you have any additional comments about the donation? Please add them here.",
-    "nl": "Open vraag?"
-})
+datetime_format = "%Y-%m-%d %H:%M:%S"
 
 
-#Not donate questions
-NO_DONATION_REASONS = props.Translatable({
-    "en": "What is/are the reason(s) that you decided not to donate your data?",
-    "nl": "Open vraag?"
-})
+def parse_datetime(value):
+    return datetime.datetime.strptime(value, datetime_format)
 
 
-def process(session_id):
-    LOGGER.info("Starting the donation flow")
-    yield donate_logs(f"{session_id}-tracking")
-
-    # progress in %
-    subflows = 1
-    steps = 3
-    step_percentage = (100 / subflows) / steps
-    progress = 0
-    progress += step_percentage
-
-    platform_name = "Netflix"
-    table_list = None
-
-    while True:
-        LOGGER.info("Prompt for file for %s", platform_name)
-        yield donate_logs(f"{session_id}-tracking")
-
-        promptFile = prompt_file("application/zip, text/plain", platform_name)
-        file_result = yield render_donation_page(platform_name, promptFile, progress)
-        selected_user = ""
-
-        if file_result.__type__ == "PayloadString":
-            validation = netflix.validate_zip(file_result.value)
-
-            # Flow logic
-            # Happy flow: Valid DDP, user was set selected
-            # Retry flow 1: No user was selected, cause could be for multiple reasons see code
-            # Retry flow 2: No valid Netflix DDP was found
-            # Retry flows are separated for clarity and you can provide different messages to the user
-
-            if validation.ddp_category is not None:
-                LOGGER.info("Payload for %s", platform_name)
-                yield donate_logs(f"{session_id}-tracking")
-
-                # Extract the user
-                users = extract_users(file_result.value)
-                if len(users) == 1:
-                    selected_user = users[0]
-                    extraction_result = extract_netflix(file_result.value, selected_user)
-                    table_list = extraction_result
-                elif len(users) > 1:
-                    selection = yield prompt_radio_menu_select_username(users, progress)
-                    if selection.__type__ == "PayloadString":
-                        selected_user = selection.value
-                        extraction_result = extract_netflix(file_result.value, selected_user)
-                        table_list = extraction_result
-                    else:
-                        LOGGER.info("User skipped during user selection")
-                        pass
-                else:
-                    LOGGER.info("No users could be found in DDP")
-                    pass
-
-            # Enter retry flow, reason: if DDP was not a Netflix DDP
-            if validation.ddp_category is None:
-                LOGGER.info("Not a valid %s zip; No payload; prompt retry_confirmation", platform_name)
-                yield donate_logs(f"{session_id}-tracking")
-                retry_result = yield render_donation_page(platform_name, retry_confirmation(platform_name), progress)
-
-                if retry_result.__type__ == "PayloadTrue":
-                    continue
-                else:
-                    LOGGER.info("Skipped during retry ending flow")
-                    yield donate_logs(f"{session_id}-tracking")
-                    break
-
-            # Enter retry flow, reason: valid DDP but no users could be extracted
-            if selected_user == "":
-                LOGGER.info("Selected user is empty after selection, enter retry flow")
-                yield donate_logs(f"{session_id}-tracking")
-                retry_result = yield render_donation_page(platform_name, retry_confirmation(platform_name), progress)
-
-                if retry_result.__type__ == "PayloadTrue":
-                    continue
-                else:
-                    LOGGER.info("Skipped during retry ending flow")
-                    yield donate_logs(f"{session_id}-tracking")
-                    break
-
-        else:
-            LOGGER.info("Skipped at file selection ending flow")
-            yield donate_logs(f"{session_id}-tracking")
-            break
-
-        # STEP 2: ask for consent
-        progress += step_percentage
-
-        if table_list is not None:
-            LOGGER.info("Prompt consent; %s", platform_name)
-            yield donate_logs(f"{session_id}-tracking")
-            prompt = create_consent_form(table_list)
-            consent_result = yield render_donation_page(platform_name, prompt, progress)
-
-            # Data was donated
-            if consent_result.__type__ == "PayloadJSON":
-                LOGGER.info("Data donated; %s", platform_name)
-                yield donate(platform_name, consent_result.value)
-                yield donate_logs(f"{session_id}-tracking")
-
-                progress += step_percentage
-                # render happy questionnaire
-                render_questionnaire_results = yield render_questionnaire(progress)
-
-                if render_questionnaire_results.__type__ == "PayloadJSON":
-                    yield donate("questionnaire_results", render_questionnaire_results.value)
-                else:
-                    LOGGER.info("Skipped questionnaire: %s", platform_name)
-                    yield donate_logs(f"{session_id}-tracking")
-
-            # Data was not donated
-            else:
-             LOGGER.info("Skipped ater reviewing consent: %s", platform_name)
-                yield donate_logs(f"{session_id}-tracking")
-
-                progress += step_percentage
-
-                # render sad questionnaire
-                render_questionnaire_results = yield render_questionnaire_no_donation(progress)
-                if render_questionnaire_results.__type__ == "PayloadJSON":
-                    yield donate("questionnaire_results", render_questionnaire_results.value)
-                else:
-                    LOGGER.info("Skipped questionnaire: %s", platform_name)
-                    yield donate_logs(f"{session_id}-tracking")
-
-            break
-
-    yield render_end_page()
+def get_in(data_dict, *key_path):
+    for k in key_path:
+        data_dict = data_dict.get(k, None)
+        if data_dict is None:
+            return None
+    return data_dict
 
 
-##################################################################
-
-def create_consent_form(table_list: list[props.PropsUIPromptConsentFormTable]) -> props.PropsUIPromptConsentForm:
-    """
-    Assembles all donated data in consent form to be displayed
-    """
-    return props.PropsUIPromptConsentForm(table_list, meta_tables=[])
-
-
-def return_empty_result_set():
-    result = {}
-
-    df = pd.DataFrame(["No data found"], columns=["No data found"])
-    result["empty"] = {"data": df, "title": TABLE_TITLES["empty_result_set"]}
-
+def get_list(data_dict, *key_path):
+    result = get_in(data_dict, *key_path)
+    if result is None:
+        return []
     return result
 
 
-def donate_logs(key):
-    log_string = LOG_STREAM.getvalue()  # read the log stream
-    if log_string:
-        log_data = log_string.split("\n")
-    else:
-        log_data = ["no logs"]
-
-    return donate(key, json.dumps(log_data))
+def get_dict(data_dict, *key_path):
+    result = get_in(data_dict, *key_path)
+    if result is None:
+        return {}
+    return result
 
 
-def prompt_radio_menu_select_username(users, progress):
+def get_string(data_dict, *key_path):
+    result = get_in(data_dict, *key_path)
+    if result is None:
+        return ""
+    return result
+
+
+def cast_number(data_dict, *key_path):
+    value = get_in(data_dict, *key_path)
+    if value is None or value == "None":
+        return 0
+    return value
+
+
+def get_activity_video_browsing_list_data(data):
+    return get_list(data, "Activity", "Video Browsing History", "VideoList")
+
+
+def get_comment_list_data(data):
+    return get_in(data, "Comment", "Comments", "CommentsList")
+
+
+def get_date_filtered_items(items):
+    for item in items:
+        timestamp = parse_datetime(item["Date"])
+        if timestamp < filter_start or timestamp > filter_end:
+            continue
+        yield (timestamp, item)
+
+
+def get_count_by_date_key(timestamps, key_func):
+    """Returns a dict of the form (key, count)
+
+    The key is determined by the key_func, which takes a datetime object and
+    returns an object suitable for sorting and usage as a dictionary key.
+
+    The returned list is sorted by key.
     """
-    Prompt selection menu to select which user you are
+    item_count = defaultdict(int)
+    for timestamp in timestamps:
+        item_count[key_func(timestamp)] += 1
+    return sorted(item_count.items())
+
+
+def get_all_first(items):
+    return (i[0] for i in items)
+
+
+def hourly_key(date):
+    return date.replace(minute=0, second=0, microsecond=0)
+
+
+def daily_key(date):
+    return date.date()
+
+
+def get_sessions(timestamps):
+    """Returns a list of tuples of the form (start, end, duration)
+
+    The start and end are datetime objects, and the duration is a timedelta
+    object.
     """
+    timestamps = list(sorted(timestamps))
+    if len(timestamps) == 0:
+        return []
+    if len(timestamps) == 1:
+        return [(timestamps[0], timestamps[0], datetime.timedelta(0))]
 
-    title = props.Translatable({ "en": "Select", "nl": "Select" })
-    description = props.Translatable({ "en": "Please select your username", "nl": "Selecteer uw gebruikersnaam" })
-    header = props.PropsUIHeader(props.Translatable({"en": "Select", "nl": "Select"}))
+    sessions = []
+    start = timestamps[0]
+    end = timestamps[0]
+    for prev, cur in zip(timestamps, timestamps[1:]):
+        if cur - prev > datetime.timedelta(minutes=5):
+            sessions.append((start, end, end - start))
+            start = cur
+        end = cur
+    sessions.append((start, end, end - start))
+    return sessions
 
-    radio_items = [{"id": i, "value": username} for i, username in enumerate(users)]
-    body = props.PropsUIPromptRadioInput(title, description, radio_items)
-    footer = props.PropsUIFooter(progress)
 
-    page = props.PropsUIPageDonation("Netflix", header, body, footer)
+def load_tiktok_data(json_file):
+    data = json.load(json_file)
+    if not get_user_name(data):
+        raise IOError("Unsupported file type")
+    return data
 
-    return CommandUIRender(page)
+
+def get_json_data_from_zip(zip_file):
+    with zipfile.ZipFile(zip_file, "r") as zip:
+        for name in zip.namelist():
+            if not name.endswith(".json"):
+                continue
+            with zip.open(name) as json_file:
+                with suppress(IOError, json.JSONDecodeError):
+                    return [load_tiktok_data(json_file)]
+    return []
 
 
-##################################################################
-# Extraction function
+def get_json_data_from_file(file_):
+    # TikTok exports can be a single JSON file or a zipped JSON file
+    try:
+        with open(file_) as f:
+            return [load_tiktok_data(f)]
+    except (json.decoder.JSONDecodeError, UnicodeDecodeError):
+        return get_json_data_from_zip(file_)
 
-def extract_netflix(netflix_zip: str, selected_user: str) -> list[props.PropsUIPromptConsentFormTable]:
+
+def filtered_count(data, *key_path):
+    items = get_list(data, *key_path)
+    filtered_items = get_date_filtered_items(items)
+    return len(list(filtered_items))
+
+
+def get_user_name(data):
+    return get_in(data, "Profile", "Profile Information", "ProfileMap", "userName")
+
+
+def get_chat_history(data):
+    return get_dict(data, "Direct Messages", "Chat History", "ChatHistory")
+
+
+def flatten_chat_history(history):
+    return itertools.chain(*history.values())
+
+
+def filter_by_key(items, key, value):
+    return filter(lambda item: item[key] == value, items)
+
+
+def exclude_by_key(items, key, value):
     """
-    Main data extraction function
-    Assemble all extraction logic here, results are stored in a dict
-
-    COMMENT: does this also make sense as the place to formulate data visualizations?
+    Return a filtered list where items that match key & value are excluded.
     """
-    tables_to_render = []
-    
-    # Extract the ratings
-    df = netflix.ratings_to_df(netflix_zip, selected_user)
-    if not df.empty:
-        table_title = props.Translatable({"en": "Netflix ratings", "nl": "Netflix ratings"})
-        wordcloud = props.PropsUITextVisualization(
-            title=props.Translatable({"en": "Highest ratings", "nl": "Hoogste ratings"}),
-            type="wordcloud",
-            text_column="Title Name",
-            value_column="Thumbs Value"        
+    return filter(lambda item: item[key] != value, items)
+
+
+def map_to_timeslot(series):
+    return series.map(lambda hour: f"{hour}-{hour+1}")
+
+
+def extract_summary_data(data):
+    user_name = get_user_name(data)
+    chat_history = get_chat_history(data)
+    flattened = flatten_chat_history(chat_history)
+    direct_messages_in_period = list(get_date_filtered_items(flattened))
+    sent_count = len(
+        list(
+            filter(lambda item: item[1]["From"] == user_name, direct_messages_in_period)
         )
-        table = props.PropsUIPromptConsentFormTable("netflix_rating", table_title, df, [wordcloud])
-        tables_to_render.append(table)
-
-    # Extract the viewing activity
-    df = netflix.viewing_activity_to_df(netflix_zip, selected_user)
-    if not df.empty:
-        table_title = props.Translatable({"en": "Netflix viewings", "nl": "Netflix viewings"})
-
-        
-        date_graph = props.PropsUIChartVisualization(
-            title=props.Translatable({"en": "Number of viewings over time", "nl": "Aantal gezien over tijd"}),
-            type="area",
-            group= props.PropsUIChartGroup(column="Start Time", dateFormat="auto"),
-            values= [props.PropsUIChartValue(label='N', column='Duration', addZeroes= True)]
+    )
+    received_count = len(
+        list(
+            filter(
+                lambda item: item[1]["From"] != user_name,
+                direct_messages_in_period,
+            )
         )
-        table = props.PropsUIPromptConsentFormTable("netflix_viewings", table_title, df, [date_graph]) 
-        tables_to_render.append(table)
-    
-    # Extract the clickstream
-    df = netflix.clickstream_to_df(netflix_zip, selected_user)
-    if not df.empty:
-        table_title = props.Translatable({"en": "Netflix clickstream", "nl": "Netflix clickstream"})
-        table = props.PropsUIPromptConsentFormTable("netflix_clickstream", table_title, df) 
-        tables_to_render.append(table)
+    )
 
-    # Extract my list
-    df = netflix.my_list_to_df(netflix_zip, selected_user)
-    if not df.empty:
-        table_title = props.Translatable({"en": "Netflix bookmarks", "nl": "Netflix bookmarks"})
-        table = props.PropsUIPromptConsentFormTable("netflix_my_list", table_title, df) 
-        tables_to_render.append(table)
+    summary_data = {
+        "Description": [
+            "Followers",
+            "Following",
+            "Likes received",
+            "Videos posted",
+            "Likes given",
+            "Comments posted",
+            "Messages sent",
+            "Messages received",
+            "Videos watched",
+        ],
+        "Number": [
+            filtered_count(data, "Activity", "Follower List", "FansList"),
+            filtered_count(data, "Activity", "Following List", "Following"),
+            cast_number(
+                data,
+                "Profile",
+                "Profile Information",
+                "ProfileMap",
+                "likesReceived",
+            ),
+            filtered_count(data, "Video", "Videos", "VideoList"),
+            filtered_count(data, "Activity", "Like List", "ItemFavoriteList"),
+            filtered_count(data, "Comment", "Comments", "CommentsList"),
+            sent_count,
+            received_count,
+            filtered_count(data, "Activity", "Video Browsing History", "VideoList"),
+        ],
+    }
 
-    # Extract Indicated preferences
-    df = netflix.indicated_preferences_to_df(netflix_zip, selected_user)
-    if not df.empty:
-        table_title = props.Translatable({"en": "Netflix indicated preferences", "nl": "Netflix indicated preferences"})
-        table = props.PropsUIPromptConsentFormTable("netflix_indicated_preferences", table_title, df) 
-        tables_to_render.append(table)
-
-    # Extract playback related events
-    df = netflix.playback_related_events_to_df(netflix_zip, selected_user)
-    if not df.empty:
-        table_title = props.Translatable({"en": "Netflix playback related events", "nl": "Netflix playback related events"})
-        table = props.PropsUIPromptConsentFormTable("netflix_playback", table_title, df) 
-        tables_to_render.append(table)
-
-    # Extract search history
-    df = netflix.search_history_to_df(netflix_zip, selected_user)
-    if not df.empty:
-        table_title = props.Translatable({"en": "Netflix search history", "nl": "Netflix search history"})
-        table = props.PropsUIPromptConsentFormTable("netflix_search", table_title, df) 
-        tables_to_render.append(table)
-
-    # Extract messages sent by netflix
-    df = netflix.messages_sent_by_netflix_to_df(netflix_zip, selected_user)
-    if not df.empty:
-        table_title = props.Translatable({"en": "Netflix messages", "nl": "Netflix messages"})
-        table = props.PropsUIPromptConsentFormTable("netflix_messages", table_title, df) 
-        tables_to_render.append(table)
-
-    return tables_to_render
-
-
-def extract_users(netflix_zip):
-    """
-    Reads viewing activity and extracts users from the first column
-    returns list[str]
-    """
-    b = unzipddp.extract_file_from_zip(netflix_zip, "ViewingActivity.csv")
-    df = unzipddp.read_csv_from_bytes_to_df(b)
-    users = netflix.extract_users_from_df(df)
-    return users
-
-
-
-def render_questionnaire(progress):
-
-    questions = [
-        props.PropsUIQuestionOpen(question=UNDERSTANDING, id=1),
-        props.PropsUIQuestionMultipleChoice(question=INDENTIFY_CONSUMPTION, id=2, choices=IDENTIFY_CONSUMPTION_CHOICES),
-        props.PropsUIQuestionMultipleChoice(question=ENJOYMENT, id=3, choices=ENJOYMENT_CHOICES),
-        props.PropsUIQuestionOpen(question=ADDITIONAL_COMMENTS, id=4),
+    visualizations = [
+        # props.PropsUIChartVisualization(
+        #     title=props.Translatable({"en": "Number of items for each data type", "nl": "Aantal items voor ieder data type"}),
+        #     type="bar",
+        #     group= props.PropsUIChartGroup(column="Description"),
+        #     values= [props.PropsUIChartValue(label='N', column='Number', aggregate="sum", addZeroes= True)]
+        # )
     ]
 
-    description = props.Translatable({"en": "Lorem ipsum dolor sit amet", "nl": "Lorem ipsum"})
-    header = props.PropsUIHeader(props.Translatable({"en": "ASD", "nl": "ASD"}))
-    body = props.PropsUIPromptQuestionnaire(questions=questions, description=description)
-    footer = props.PropsUIFooter(progress)
+    return ExtractionResult(
+        "tiktok_summary",
+        props.Translatable(
+            {"en": "Summary information", "nl": "Samenvatting gegevens"}
+        ),
+        pd.DataFrame(summary_data),
+        visualizations,
+    )
 
-    page = props.PropsUIPageDonation("ASD", header, body, footer)
-    return CommandUIRender(page)
 
-def render_questionnaire_no_donation(progress):
-    questions = [
-        props.PropsUIQuestionOpen(question=UNDERSTANDING, id=1),
-        props.PropsUIQuestionMultipleChoice(question=INDENTIFY_CONSUMPTION, id=2, choices=IDENTIFY_CONSUMPTION_CHOICES),
-        props.PropsUIQuestionMultipleChoice(question=ENJOYMENT, id=3, choices=ENJOYMENT_CHOICES),
-        props.PropsUIQuestionOpen(question=NO_DONATION_REASONS, id=5),
-        props.PropsUIQuestionOpen(question=ADDITIONAL_COMMENTS, id=4),
+def extract_videos_viewed(data):
+    videos = get_all_first(
+        get_date_filtered_items(get_activity_video_browsing_list_data(data))
+    )
+    video_counts = get_count_by_date_key(videos, hourly_key)
+    if not video_counts:
+        return
+
+    df = pd.DataFrame(video_counts, columns=["Date", "Videos"])
+    df["Timeslot"] = map_to_timeslot(df["Date"].dt.hour)
+    df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
+    df = df.reindex(columns=["Date", "Timeslot", "Videos"])
+
+    visualizations = [
+        props.PropsUIChartVisualization(
+            title=props.Translatable(
+                {
+                    "en": "Number of videos per timeslot",
+                    "nl": "Aantal bekeken videos per tijdslot",
+                }
+            ),
+            type="bar",
+            group=props.PropsUIChartGroup(column="Timeslot"),
+            values=[
+                props.PropsUIChartValue(
+                    label="N", column="Videos", aggregate="sum", addZeroes=True
+                )
+            ],
+        )
     ]
 
-    description = props.Translatable({"en": "Lorem ipsum dolor sit amet", "nl": "Lorem ipsum"})
-    header = props.PropsUIHeader(props.Translatable({"en": "ASD", "nl": "ASD"}))
-    body = props.PropsUIPromptQuestionnaire(questions=questions, description=description)
-    footer = props.PropsUIFooter(progress)
+    return ExtractionResult(
+        "tiktok_videos_viewed",
+        props.Translatable({"en": "Video views", "nl": "Videos gezien"}),
+        df,
+        visualizations,
+    )
 
-    page = props.PropsUIPageDonation("ASD", header, body, footer)
-    return CommandUIRender(page)
+
+def extract_video_posts(data):
+    video_list = get_in(data, "Video", "Videos", "VideoList")
+    if video_list is None:
+        return
+    videos = get_date_filtered_items(video_list)
+    post_stats = defaultdict(lambda: defaultdict(int))
+    for date, video in videos:
+        hourly_stats = post_stats[hourly_key(date)]
+        hourly_stats["Videos"] += 1
+        hourly_stats["Likes received"] += int(video["Likes"])
+
+    df = pd.DataFrame(post_stats).transpose()
+    df["Date"] = df.index.strftime("%Y-%m-%d")
+    df["Timeslot"] = map_to_timeslot(df.index.hour)
+    df = df.reset_index(drop=True)
+    df = df.reindex(columns=["Date", "Timeslot", "Videos", "Likes received"])
+
+    visualizations = []
+
+    return ExtractionResult(
+        "tiktok_posts",
+        props.Translatable({"en": "Video posts", "nl": "Video posts"}),
+        df,
+        visualizations,
+    )
 
 
-##########################################
-# Functions provided by Eyra did not change
+def extract_comments_and_likes(data):
+    comments = get_all_first(
+        get_date_filtered_items(get_list(data, "Comment", "Comments", "CommentsList"))
+    )
+    comment_counts = get_count_by_date_key(comments, hourly_key)
+
+    likes_given = get_all_first(
+        get_date_filtered_items(
+            get_list(data, "Activity", "Like List", "ItemFavoriteList")
+        )
+    )
+    likes_given_counts = get_count_by_date_key(likes_given, hourly_key)
+    if not likes_given_counts:
+        return
+
+    df1 = pd.DataFrame(comment_counts, columns=["Date", "Comment posts"]).set_index(
+        "Date"
+    )
+    df2 = pd.DataFrame(likes_given_counts, columns=["Date", "Likes given"]).set_index(
+        "Date"
+    )
+
+    df = pd.merge(df1, df2, left_on="Date", right_on="Date", how="outer").sort_index()
+    df["Timeslot"] = map_to_timeslot(df.index.hour)
+    df["Date"] = df.index.strftime("%Y-%m-%d")
+    df = (
+        df.reindex(columns=["Date", "Timeslot", "Comment posts", "Likes given"])
+        .reset_index(drop=True)
+        .fillna(0)
+    )
+    df["Comment posts"] = df["Comment posts"].astype(int)
+    df["Likes given"] = df["Likes given"].astype(int)
+
+    visualizations = []
+
+    return ExtractionResult(
+        "tiktok_comments_and_likes",
+        props.Translatable({"en": "Comments and likes", "nl": "Comments en likes"}),
+        df,
+        visualizations,
+    )
+
+
+def extract_session_info(data):
+    session_paths = [
+        ("Video", "Videos", "VideoList"),
+        ("Activity", "Video Browsing History", "VideoList"),
+        ("Comment", "Comments", "CommentsList"),
+    ]
+
+    item_lists = [get_list(data, *path) for path in session_paths]
+    dates = get_all_first(get_date_filtered_items(itertools.chain(*item_lists)))
+
+    sessions = get_sessions(dates)
+    df = pd.DataFrame(sessions, columns=["Start", "End", "Duration"])
+    df["Start"] = df["Start"].dt.strftime("%Y-%m-%d %H:%M")
+    df["Duration (in minutes)"] = (df["Duration"].dt.total_seconds() / 60).round(2)
+    df = df.drop("End", axis=1)
+    df = df.drop("Duration", axis=1)
+
+    visualizations = []
+
+    return ExtractionResult(
+        "tiktok_session_info",
+        props.Translatable({"en": "Session information", "nl": "Sessie informatie"}),
+        df,
+        visualizations,
+    )
+
+
+def extract_direct_messages(data):
+    history = get_in(data, "Direct Messages", "Chat History", "ChatHistory")
+    counter = itertools.count(start=1)
+    anon_ids = defaultdict(lambda: next(counter))
+    # Ensure 1 is the ID of the donating user
+    anon_ids[get_user_name(data)]
+    table = {"Anonymous ID": [], "Sent": []}
+    for item in flatten_chat_history(history):
+        table["Anonymous ID"].append(anon_ids[item["From"]])
+        table["Sent"].append(parse_datetime(item["Date"]).strftime("%Y-%m-%d %H:%M"))
+
+    visualizations = []
+
+    return ExtractionResult(
+        "tiktok_direct_messages",
+        props.Translatable(
+            {"en": "Direct Message Activity", "nl": "Berichten activiteit"}
+        ),
+        pd.DataFrame(table),
+        visualizations,
+    )
+
+
+def extract_comment_activity(data):
+    comments = get_in(data, "Comment", "Comments", "CommentsList")
+    if comments is None:
+        return
+    timestamps = [
+        parse_datetime(item["Date"]).strftime("%Y-%m-%d %H:%M") for item in comments
+    ]
+
+    visualizations = []
+
+    return ExtractionResult(
+        "tiktok_comment_activity",
+        props.Translatable({"en": "Comment Activity", "nl": "Commentaar activiteit"}),
+        pd.DataFrame({"Posted on": timestamps}),
+        visualizations,
+    )
+
+
+def extract_videos_liked(data):
+    favorite_videos = get_in(data, "Activity", "Favorite Videos", "FavoriteVideoList")
+    if favorite_videos is None:
+        return
+    table = {"Liked": [], "Link": []}
+    for item in favorite_videos:
+        table["Liked"].append(parse_datetime(item["Date"]).strftime("%Y-%m-%d %H:%M"))
+        table["Link"].append(item["Link"])
+
+    visualizations = []
+
+    return ExtractionResult(
+        "tiktok_videos_liked",
+        props.Translatable({"en": "Videos liked", "nl": "Gelikete videos"}),
+        pd.DataFrame(table),
+        visualizations,
+    )
+
+
+def extract_tiktok_data(zip_file):
+    extractors = [
+        extract_summary_data,
+        extract_video_posts,
+        extract_comments_and_likes,
+        extract_videos_viewed,
+        extract_session_info,
+        extract_direct_messages,
+        extract_comment_activity,
+        extract_videos_liked,
+    ]
+    for data in get_json_data_from_file(zip_file):
+        return [
+            table
+            for table in (extractor(data) for extractor in extractors)
+            if table is not None
+        ]
+
+
+######################
+# Data donation flow #
+######################
+
+ExtractionResult = namedtuple(
+    "ExtractionResult", ["id", "title", "data_frame", "visualizations"]
+)
+
+
+class InvalidFileError(Exception):
+    """Indicates that the file does not match expectations."""
+
+
+class SkipToNextStep(Exception):
+    pass
+
+
+class DataDonationProcessor:
+    def __init__(self, platform, mime_types, extractor, session_id):
+        self.platform = platform
+        self.mime_types = mime_types
+        self.extractor = extractor
+        self.session_id = session_id
+        self.progress = 0
+        self.meta_data = []
+
+    def process(self):
+        with suppress(SkipToNextStep):
+            while True:
+                file_result = yield from self.prompt_file()
+
+                self.log(f"extracting file")
+                try:
+                    extraction_result = self.extract_data(file_result.value)
+                except IOError as e:
+                    self.log(f"prompt confirmation to retry file selection")
+                    yield from self.prompt_retry()
+                    return
+                except InvalidFileError:
+                    self.log(f"invalid file detected, prompting for retry")
+                    if (yield from self.prompt_retry()):
+                        continue
+                    else:
+                        return
+                else:
+                    if extraction_result is None:
+                        try_again = yield from self.prompt_retry()
+                        if try_again:
+                            continue
+                        else:
+                            return
+                    self.log(f"extraction successful, go to consent form")
+                    yield from self.prompt_consent(extraction_result)
+
+    def prompt_retry(self):
+        retry_result = yield render_donation_page(
+            self.platform, retry_confirmation(self.platform), self.progress
+        )
+        return retry_result.__type__ == "PayloadTrue"
+
+    def prompt_file(self):
+        description = props.Translatable(
+            {
+                "en": f"Please follow the download instructions and choose the file that you stored on your device. Click “Skip” at the right bottom, if you do not have a {self.platform} file. ",
+                "nl": f"Volg de download instructies en kies het bestand dat u opgeslagen heeft op uw apparaat. Als u geen {self.platform} bestand heeft klik dan op “Overslaan” rechts onder.",
+            }
+        )
+        prompt_file = props.PropsUIPromptFileInput(description, self.mime_types)
+        file_result = yield render_donation_page(
+            self.platform, prompt_file, self.progress
+        )
+        if file_result.__type__ != "PayloadString":
+            self.log(f"skip to next step")
+            raise SkipToNextStep()
+        return file_result
+
+    def log(self, message):
+        self.meta_data.append(("debug", f"{self.platform}: {message}"))
+
+    def extract_data(self, file):
+        return self.extractor(file)
+
+    def prompt_consent(self, data):
+        log_title = props.Translatable({"en": "Log messages", "nl": "Log berichten"})
+
+        tables = [
+            props.PropsUIPromptConsentFormTable(
+                table.id, table.title, table.data_frame, table.visualizations
+            )
+            for table in data
+        ]
+        meta_frame = pd.DataFrame(self.meta_data, columns=["type", "message"])
+        meta_table = props.PropsUIPromptConsentFormTable(
+            "log_messages", log_title, meta_frame
+        )
+        self.log(f"prompt consent")
+        consent_result = yield render_donation_page(
+            self.platform,
+            props.PropsUIPromptConsentForm(tables, [meta_table]),
+            self.progress,
+        )
+
+        if consent_result.__type__ == "PayloadJSON":
+            self.log(f"donate consent data")
+            yield donate(f"{self.sessionId}-{self.platform}", consent_result.value)
+
+
+class DataDonation:
+    def __init__(self, platform, mime_types, extractor):
+        self.platform = platform
+        self.mime_types = mime_types
+        self.extractor = extractor
+
+    def __call__(self, session_id):
+        processor = DataDonationProcessor(
+            self.platform, self.mime_types, self.extractor, session_id
+        )
+        yield from processor.process()
+
+
+tik_tok_data_donation = DataDonation(
+    "TikTok", "application/zip, text/plain, application/json", extract_tiktok_data
+)
+
+
+def process(session_id):
+    progress = 0
+    yield donate(f"{session_id}-tracking", '[{ "message": "user entered script" }]')
+    yield from tik_tok_data_donation(session_id)
+    yield render_end_page()
+
 
 def render_end_page():
     page = props.PropsUIPageEnd()
@@ -396,8 +617,8 @@ def render_donation_page(platform, body, progress):
 def retry_confirmation(platform):
     text = props.Translatable(
         {
-            "en": f"Unfortunately, we could not process your {platform} file. If you are sure that you selected the correct file, press Continue. To select a different file, press Try again.",
-            "nl": f"Helaas, kunnen we uw {platform} bestand niet verwerken. Weet u zeker dat u het juiste bestand heeft gekozen? Ga dan verder. Probeer opnieuw als u een ander bestand wilt kiezen."
+            "en": "Unfortunately, we cannot process your data. Please make sure that you selected JSON as a file format when downloading your data from TikTok.",
+            "nl": "Helaas kunnen we uw gegevens niet verwerken. Zorg ervoor dat u JSON heeft geselecteerd als bestandsformaat bij het downloaden van uw gegevens van TikTok.",
         }
     )
     ok = props.Translatable({"en": "Try again", "nl": "Probeer opnieuw"})
@@ -405,15 +626,30 @@ def retry_confirmation(platform):
     return props.PropsUIPromptConfirm(text, ok, cancel)
 
 
-def prompt_file(extensions, platform):
-    description = props.Translatable(
-        {
-            "en": f"Please follow the download instructions and choose the file that you stored on your device. Click “Skip” at the right bottom, if you do not have a file from {platform}.",
-            "nl": f"Volg de download instructies en kies het bestand dat u opgeslagen heeft op uw apparaat. Als u geen {platform} bestand heeft klik dan op “Overslaan” rechts onder."
-        }
+def prompt_consent(id, data, meta_data):
+    table_title = props.Translatable(
+        {"en": "Zip file contents", "nl": "Inhoud zip bestand"}
     )
-    return props.PropsUIPromptFileInput(description, extensions)
+
+    log_title = props.Translatable({"en": "Log messages", "nl": "Log berichten"})
+
+    data_frame = pd.DataFrame(data, columns=["filename", "compressed size", "size"])
+    table = props.PropsUIPromptConsentFormTable("zip_content", table_title, data_frame)
+    meta_frame = pd.DataFrame(meta_data, columns=["type", "message"])
+    meta_table = props.PropsUIPromptConsentFormTable(
+        "log_messages", log_title, meta_frame
+    )
+    return props.PropsUIPromptConsentForm([table], [meta_table])
 
 
 def donate(key, json_string):
     return CommandSystemDonate(key, json_string)
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) > 1:
+        print(extract_tiktok_data(sys.argv[1]))
+    else:
+        print("please provide a zip file as argument")
