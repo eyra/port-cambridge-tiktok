@@ -6,7 +6,7 @@ import {
   ChartVisualization
 } from '../../../../../types/visualizations'
 
-export async function prepareChartData (
+export async function prepareChartData(
   table: PropsUITable & TableContext,
   visualization: ChartVisualization
 ): Promise<ChartVisualizationData> {
@@ -28,9 +28,6 @@ export async function prepareChartData (
   const rowIds = table.body.rows.map((row) => row.id)
 
   let groupBy = getTableColumn(table, visualization.group.column)
-  // KASPER CHECK: I think the first clause in the statement can go
-  // getTableColumn will return a string array or errs out
-  // so only check for length is still doing something
   if (groupBy.length === 0) {
     throw new Error(`X column ${table.id}.${visualization.group.column} not found`)
   }
@@ -40,6 +37,9 @@ export async function prepareChartData (
   if (visualization.group.dateFormat !== undefined) {
     ;[groupBy, xSortable] = formatDate(groupBy, visualization.group.dateFormat)
   }
+  if (visualization.group.levels !== undefined) {
+    xSortable = groupBy.map((x) => visualization?.group?.levels?.indexOf(x) ?? -1)
+  }
 
   const aggregate: Record<string, PrepareAggregatedData> = {}
   for (const value of visualization.values) {
@@ -48,7 +48,6 @@ export async function prepareChartData (
     if (aggFun === 'pct' || aggFun === 'count_pct') tickerFormat = 'percent'
 
     const yValues = getTableColumn(table, value.column)
-    // KASPER CHECK
     if (yValues.length === 0) throw new Error(`Y column ${table.id}.${value.column} not found`)
 
     // If group_by column is specified, the columns in the aggregated data will be the unique group_by columns
@@ -56,11 +55,39 @@ export async function prepareChartData (
 
     // if missing values should be treated as zero, we need to add the missing values after knowing all groups
     const addZeroes = value.addZeroes ?? false
-    const groupSummary: Record<string, { n: number, sum: number }> = {}
+    const groupSummary: Record<string, { n: number; sum: number }> = {}
     const uniqueGroups = new Set<string>([])
+
+    if (addZeroes && visualization.group.levels !== undefined) {
+      for (const level of visualization.group.levels) {
+        aggregate[level] = {
+          sortBy: visualization.group.levels.indexOf(level),
+          rowIds: {},
+          xLabel: visualizationData.xKey.label,
+          xValue: String(level),
+          values: {}
+        }
+      }
+    }
 
     for (let i = 0; i < groupBy.length; i++) {
       const xValue = groupBy[i]
+
+      if (visualization.group.range !== undefined) {
+        if (
+          Number(xValue) < visualization.group.range[0] ||
+          Number(xValue) > visualization.group.range[1]
+        )
+          continue
+      }
+
+      // SHOULD GROUP BE IGNORED IF NOT IN group.levels? MAYBE NOT, BECAUSE
+      // THIS COULD HARM INFORMED CONSENT IF THE RESEARCHER IS UNAWARE OF CERTAIN GROUPS
+      // if (visualization.group.levels !== undefined) {
+      //   // formatLevels has xSortable < 0 if no match with levels
+      //   if (xSortable !== null && xSortable[i] < 0) continue
+      // }
+
       const yValue = yValues[i]
       const group =
         yGroup != null ? yGroup[i] : value.label !== undefined ? value.label : value.column
@@ -126,6 +153,7 @@ export async function prepareChartData (
     .sort((a: any, b: any) => (a.sortBy < b.sortBy ? -1 : b.sortBy < a.sortBy ? 1 : 0))
     .map((d) => {
       for (const key of Object.keys(d.values)) d.values[key] = Math.round(d.values[key] * 100) / 100
+
       return {
         ...d.values,
         [d.xLabel]: d.xValue,

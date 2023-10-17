@@ -15,6 +15,7 @@ class Translations(TypedDict):
     en: str
     nl: str
 
+
 @dataclass
 class Translatable:
     """Wrapper class for Translations"""
@@ -84,6 +85,7 @@ class PropsUIPromptConfirm:
         dict["cancel"] = self.cancel.toDict()
         return dict
 
+
 @dataclass
 class PropsUIChartGroup:
     """Grouping variable for aggregating the data
@@ -93,10 +95,12 @@ class PropsUIChartGroup:
         label: Optionally, a label to display in the visualization (default is the column name)
         dateFormat: if given, transforms a data column to the specified date format for aggregation
     """
+
     column: str
     label: Optional[str] = None
     dateFormat: Optional[str] = None
-    tokenize: Optional[bool] = False
+    range: Optional[list[int]] = None
+    levels: Optional[list[str]] = None
 
     def toDict(self):
         dict = {}
@@ -104,7 +108,11 @@ class PropsUIChartGroup:
         dict["column"] = self.column
         dict["label"] = self.label
         dict["dateFormat"] = self.dateFormat
+        dict["range"] = self.range
+        dict["levels"] = self.levels
+
         return dict
+
 
 @dataclass
 class PropsUIChartValue:
@@ -116,6 +124,7 @@ class PropsUIChartValue:
         aggregate: function for aggregating the values
         addZeroes: if true, add zeroes for missing values
     """
+
     column: str
     label: Optional[str] = None
     aggregate: Optional[str] = "count"
@@ -130,6 +139,7 @@ class PropsUIChartValue:
         dict["addZeroes"] = self.addZeroes
         return dict
 
+
 @dataclass
 class PropsUIChartVisualization:
     """Data visualization
@@ -140,11 +150,12 @@ class PropsUIChartVisualization:
         group: grouping variable for aggregating the data
         values: list of values to aggregate
     """
+
     title: Translatable
     type: Literal["bar", "line", "area"]
     group: PropsUIChartGroup
     values: list[PropsUIChartValue]
-        
+
     def toDict(self):
         dict = {}
         dict["__type__"] = "PropsUIChartVisualization"
@@ -153,18 +164,18 @@ class PropsUIChartVisualization:
         dict["group"] = self.group.toDict()
         dict["values"] = [value.toDict() for value in self.values]
         return dict
-    
+
+
 @dataclass
 class PropsUITextVisualization:
-    """Word cloud visualization
+    """Word cloud visualization"""
 
-    """
     title: Translatable
     type: Literal["wordcloud"]
     text_column: str
     value_column: Optional[str] = None
     tokenize: Optional[bool] = False
-        
+
     def toDict(self):
         dict = {}
         dict["__type__"] = "PropsUITextVisualization"
@@ -191,8 +202,10 @@ class PropsUIPromptConsentFormTable:
     id: str
     title: Translatable
     data_frame: pd.DataFrame
-    #editable: bool = True
-    visualizations: Optional[list[PropsUIChartVisualization | PropsUITextVisualization]] = None
+    # editable: bool = True
+    visualizations: Optional[
+        list[PropsUIChartVisualization | PropsUITextVisualization]
+    ] = None
 
     def translate_visualizations(self):
         if self.visualizations is None:
@@ -205,17 +218,14 @@ class PropsUIPromptConsentFormTable:
         dict["id"] = self.id
         dict["title"] = self.title.toDict()
         dict["data_frame"] = self.data_frame.to_json()
-        #dict["editable"] = self.editable
+        # dict["editable"] = self.editable
         dict["visualizations"] = self.translate_visualizations()
         return dict
-    
-
-
 
 
 @dataclass
 class PropsUIPromptConsentForm:
-    """Tables and Visualization to be shown to the participant prior to donation 
+    """Tables and Visualization to be shown to the participant prior to donation
 
     Attributes:
         tables: a list of tables
@@ -306,13 +316,14 @@ class PropsUIPromptRadioInput:
 class PropsUIQuestionOpen:
     """Question: Open Question
 
-    This class can be used to ask an open question to a user. 
+    This class can be used to ask an open question to a user.
     The user can type the answer in the a text field
 
     Attributes:
         id: Should be a unique ID to identify the question, example: "1"
         question: The question that will be asked
     """
+
     id: int
     question: Translatable
 
@@ -328,13 +339,14 @@ class PropsUIQuestionOpen:
 class PropsUIQuestionMultipleChoiceCheckbox:
     """Question: Multiple choice checkbox
 
-    This class can be used to ask an multiple choice question to a user. 
+    This class can be used to ask an multiple choice question to a user.
     Multiple answers can be given
 
     Attributes:
         id: Should be a unique ID to identify the question, example: "1"
         question: The question that will be asked
     """
+
     id: int
     question: Translatable
     choices: list[Translatable]
@@ -352,13 +364,14 @@ class PropsUIQuestionMultipleChoiceCheckbox:
 class PropsUIQuestionMultipleChoice:
     """Question: Multiple choice
 
-    This class can be used to ask an multiple choice question to a user. 
+    This class can be used to ask an multiple choice question to a user.
     Only one answer can be given
 
     Attributes:
         id: Should be a unique ID to identify the question, example: "1"
         question: The question that will be asked
     """
+
     id: int
     question: Translatable
     choices: list[Translatable]
@@ -379,17 +392,22 @@ class PropsUIPromptQuestionnaire:
     This class can be used to assemble question in a questionnaire.
     This class can be used as a body in PropsUIPageDonation
 
-    * All questions are optional 
+    * All questions are optional
     * Results are returned to the script after the user clicks the continue button
-        The results will be in your_results.value, example: 
+        The results will be in your_results.value, example:
         {"1": "answer 1", "2": ["answer 1", "answer 2"], "3": "open answer"}
 
     Attributes:
         description: Short descrition
         questions: List of questions that need to be asked
     """
+
     description: Translatable
-    questions: list[PropsUIQuestionMultipleChoice | PropsUIQuestionMultipleChoiceCheckbox | PropsUIQuestionOpen]
+    questions: list[
+        PropsUIQuestionMultipleChoice
+        | PropsUIQuestionMultipleChoiceCheckbox
+        | PropsUIQuestionOpen
+    ]
 
     def toDict(self):
         dict = {}
@@ -423,7 +441,6 @@ class PropsUIPageDonation:
         dict["body"] = self.body.toDict()
         dict["footer"] = self.footer.toDict()
         return dict
-    
 
 
 class PropsUIPageEnd:

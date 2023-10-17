@@ -18,7 +18,8 @@ export interface AggregationGroup {
   label?: string
   column: string
   dateFormat?: DateFormat
-  tokenize?: boolean
+  range?: [number, number]
+  levels?: string[]
 }
 
 export interface AggregationValue {
