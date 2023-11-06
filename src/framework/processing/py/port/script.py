@@ -264,50 +264,22 @@ def extract_videos_viewed(data):
 
     df = pd.DataFrame(video_counts, columns=["Date", "Videos"])
     df["Timeslot"] = map_to_timeslot(df["Date"].dt.hour)
-    df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
+    df["Date"] = df["Date"].dt.strftime("%Y-%m-%d %H:00:00")
     df = df.reindex(columns=["Date", "Timeslot", "Videos"])
 
     visualizations = [
         props.PropsUIChartVisualization(
             title=props.Translatable(
                 {
-                    "en": "Number of videos per timeslot",
-                    "nl": "Aantal bekeken videos per tijdslot",
+                    "en": "Number of videos watched for every hour of the day",
+                    "nl": "Aantal videos bekeken per uur van de dag",
                 }
             ),
             type="bar",
-            group=props.PropsUIChartGroup(
-                column="Timeslot",
-                levels=[
-                    "0-1",
-                    "1-2",
-                    "2-3",
-                    "3-4",
-                    "4-5",
-                    "5-6",
-                    "6-7",
-                    "7-8",
-                    "8-9",
-                    "9-10",
-                    "10-11",
-                    "11-12",
-                    "12-13",
-                    "13-14",
-                    "14-15",
-                    "15-16",
-                    "16-17",
-                    "17-18",
-                    "18-19",
-                    "19-20",
-                    "20-21",
-                    "21-22",
-                    "22-23",
-                    "23-24",
-                ],
-            ),
+            group=props.PropsUIChartGroup(column="Date", dateFormat="hour_cycle"),
             values=[
                 props.PropsUIChartValue(
-                    label="N", column="Videos", aggregate="sum", addZeroes=True
+                    column="Videos", aggregate="sum", addZeroes=True
                 )
             ],
         )
@@ -372,7 +344,7 @@ def extract_comments_and_likes(data):
 
     df = pd.merge(df1, df2, left_on="Date", right_on="Date", how="outer").sort_index()
     df["Timeslot"] = map_to_timeslot(df.index.hour)
-    df["Date"] = df.index.strftime("%Y-%m-%d")
+    df["Date"] = df.index.strftime("%Y-%m-%d %H:00:00")
     df = (
         df.reindex(columns=["Date", "Timeslot", "Comment posts", "Likes given"])
         .reset_index(drop=True)
@@ -381,7 +353,26 @@ def extract_comments_and_likes(data):
     df["Comment posts"] = df["Comment posts"].astype(int)
     df["Likes given"] = df["Likes given"].astype(int)
 
-    visualizations = []
+    visualizations = [
+        props.PropsUIChartVisualization(
+            title=props.Translatable(
+                {
+                    "en": "Number of comments and likes for every hour of the day",
+                    "nl": "Aantal comments en likes per uur van de dag",
+                }
+            ),
+            type="bar",
+            group=props.PropsUIChartGroup(column="Date", dateFormat="hour_cycle"),
+            values=[
+                props.PropsUIChartValue(
+                    label="Comments and likes",
+                    column="Date",
+                    aggregate="count",
+                    addZeroes=True,
+                )
+            ],
+        )
+    ]
 
     return ExtractionResult(
         "tiktok_comments_and_likes",
@@ -408,7 +399,26 @@ def extract_session_info(data):
     df = df.drop("End", axis=1)
     df = df.drop("Duration", axis=1)
 
-    visualizations = []
+    visualizations = [
+        props.PropsUIChartVisualization(
+            title=props.Translatable(
+                {
+                    "en": "Number of minutes spent on TikTok",
+                    "nl": "Aantal minuten besteed aan TikTok",
+                }
+            ),
+            type="line",
+            group=props.PropsUIChartGroup(column="Start", dateFormat="auto"),
+            values=[
+                props.PropsUIChartValue(
+                    label="Nr. of minutes",
+                    column="Duration (in minutes)",
+                    aggregate="sum",
+                    addZeroes=True,
+                )
+            ],
+        )
+    ]
 
     return ExtractionResult(
         "tiktok_session_info",

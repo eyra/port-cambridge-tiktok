@@ -65,6 +65,7 @@ export interface AxisSettings {
 }
 
 export type TickerFormat = 'percent' | 'default'
+export type XType = 'string' | 'date'
 
 export interface ChartVisualizationData {
   type: 'line' | 'bar' | 'area'
@@ -87,5 +88,4 @@ export type DateFormat =
   | 'hour'
   | 'month_cycle'
   | 'weekday_cycle'
-  | 'day_cycle'
   | 'hour_cycle'
