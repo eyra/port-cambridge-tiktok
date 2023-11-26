@@ -1,7 +1,7 @@
 import { PropsUITable, TableContext } from '../../../../../types/elements'
 import { DateFormat } from '../../../../../types/visualizations'
 
-export function formatDate(
+export function formatDate (
   dateString: string[],
   format: DateFormat,
   minValues: number = 10
@@ -78,7 +78,7 @@ export function formatDate(
   return [formattedDate, sortableDate]
 }
 
-function autoFormatDate(dateNumbers: number[], minValues: number): DateFormat {
+function autoFormatDate (dateNumbers: number[], minValues: number): DateFormat {
   const minTime = Math.min(...dateNumbers)
   const maxTime = Math.max(...dateNumbers)
 
@@ -91,7 +91,7 @@ function autoFormatDate(dateNumbers: number[], minValues: number): DateFormat {
   return autoFormat
 }
 
-function createSortable(
+function createSortable (
   domain: [number, number],
   interval: string,
   formatter: (date: Date) => string
@@ -123,18 +123,18 @@ function createSortable(
   return sortable
 }
 
-export function tokenize(text: string): string[] {
+export function tokenize (text: string): string[] {
   const tokens = text.split(' ')
   return tokens.filter((token) => /\p{L}/giu.test(token)) // only tokens with word characters
 }
 
-export function getTableColumn(table: PropsUITable & TableContext, column: string): string[] {
+export function getTableColumn (table: PropsUITable & TableContext, column: string): string[] {
   const columnIndex = table.head.cells.findIndex((cell) => cell.text === column)
   if (columnIndex < 0) throw new Error(`column ${table.id}.${column} not found`)
   return table.body.rows.map((row) => row.cells[columnIndex].text)
 }
 
-export function rescaleToRange(
+export function rescaleToRange (
   value: number,
   min: number,
   max: number,

@@ -235,22 +235,19 @@ def extract_summary_data(data):
         ],
     }
 
-    visualizations = [
-        # props.PropsUIChartVisualization(
-        #     title=props.Translatable({"en": "Number of items for each data type", "nl": "Aantal items voor ieder data type"}),
-        #     type="bar",
-        #     group= props.PropsUIChartGroup(column="Description"),
-        #     values= [props.PropsUIChartValue(label='N', column='Number', aggregate="sum", addZeroes= True)]
-        # )
-    ]
-
     return ExtractionResult(
         "tiktok_summary",
         props.Translatable(
             {"en": "Summary information", "nl": "Samenvatting gegevens"}
         ),
         pd.DataFrame(summary_data),
-        visualizations,
+        props.Translatable(
+            {
+                "en": "Here we can now add a description per table to better help the user understand what the data is about. The description should be short. Say about one to three sentences",
+                "nl": "Hier kunnen we nu een beschrijving per tabel toevoegen om de gebruiker beter te helpen begrijpen waar de gegevens over gaan. De beschrijving moet kort zijn. Zeg ongeveer één tot drie zinnen",
+            }
+        ),
+        None,
     )
 
 
@@ -289,6 +286,7 @@ def extract_videos_viewed(data):
         "tiktok_videos_viewed",
         props.Translatable({"en": "Video views", "nl": "Videos gezien"}),
         df,
+        None,
         visualizations,
     )
 
@@ -310,13 +308,12 @@ def extract_video_posts(data):
     df = df.reset_index(drop=True)
     df = df.reindex(columns=["Date", "Timeslot", "Videos", "Likes received"])
 
-    visualizations = []
-
     return ExtractionResult(
         "tiktok_posts",
         props.Translatable({"en": "Video posts", "nl": "Video posts"}),
         df,
-        visualizations,
+        None,
+        None,
     )
 
 
@@ -378,6 +375,7 @@ def extract_comments_and_likes(data):
         "tiktok_comments_and_likes",
         props.Translatable({"en": "Comments and likes", "nl": "Comments en likes"}),
         df,
+        None,
         visualizations,
     )
 
@@ -424,6 +422,7 @@ def extract_session_info(data):
         "tiktok_session_info",
         props.Translatable({"en": "Session information", "nl": "Sessie informatie"}),
         df,
+        None,
         visualizations,
     )
 
@@ -439,15 +438,14 @@ def extract_direct_messages(data):
         table["Anonymous ID"].append(anon_ids[item["From"]])
         table["Sent"].append(parse_datetime(item["Date"]).strftime("%Y-%m-%d %H:%M"))
 
-    visualizations = []
-
     return ExtractionResult(
         "tiktok_direct_messages",
         props.Translatable(
             {"en": "Direct Message Activity", "nl": "Berichten activiteit"}
         ),
         pd.DataFrame(table),
-        visualizations,
+        None,
+        None,
     )
 
 
@@ -459,13 +457,12 @@ def extract_comment_activity(data):
         parse_datetime(item["Date"]).strftime("%Y-%m-%d %H:%M") for item in comments
     ]
 
-    visualizations = []
-
     return ExtractionResult(
         "tiktok_comment_activity",
         props.Translatable({"en": "Comment Activity", "nl": "Commentaar activiteit"}),
         pd.DataFrame({"Posted on": timestamps}),
-        visualizations,
+        None,
+        None,
     )
 
 
@@ -478,13 +475,10 @@ def extract_videos_liked(data):
         table["Liked"].append(parse_datetime(item["Date"]).strftime("%Y-%m-%d %H:%M"))
         table["Link"].append(item["Link"])
 
-    visualizations = []
-
     return ExtractionResult(
         "tiktok_videos_liked",
         props.Translatable({"en": "Videos liked", "nl": "Gelikete videos"}),
         pd.DataFrame(table),
-        visualizations,
     )
 
 
@@ -512,7 +506,7 @@ def extract_tiktok_data(zip_file):
 ######################
 
 ExtractionResult = namedtuple(
-    "ExtractionResult", ["id", "title", "data_frame", "visualizations"]
+    "ExtractionResult", ["id", "title", "data_frame", "description", "visualizations"]
 )
 
 
@@ -594,7 +588,11 @@ class DataDonationProcessor:
 
         tables = [
             props.PropsUIPromptConsentFormTable(
-                table.id, table.title, table.data_frame, table.visualizations
+                table.id,
+                table.title,
+                table.data_frame,
+                table.description,
+                table.visualizations,
             )
             for table in data
         ]
