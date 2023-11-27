@@ -1,8 +1,8 @@
 {
   "files": {
-    "main.css": "./static/css/main.9a62198e.css",
-    "main.js": "./static/js/main.980357ea.js",
-    "static/js/448.2cb2cbcf.chunk.js": "./static/js/448.2cb2cbcf.chunk.js",
+    "main.css": "./static/css/main.46751f90.css",
+    "main.js": "./static/js/main.55596032.js",
+    "static/js/448.94097709.chunk.js": "./static/js/448.94097709.chunk.js",
     "static/media/Finador-BlackOblique.woff": "./static/media/Finador-BlackOblique.8e3feb4617564028ac09.woff",
     "static/media/Finador-RegularOblique.woff": "./static/media/Finador-RegularOblique.66b1b40866f3f75015d6.woff",
     "static/media/Finador-LightOblique.woff": "./static/media/Finador-LightOblique.3e4bf52dd453804f5c5a.woff",
@@ -42,12 +42,12 @@
     "static/media/back.svg": "./static/media/back.da58add26f133b17074fc3c8bc19b1d4.svg",
     "static/media/check.svg": "./static/media/check.62d1e3846cf9f4002c37c986555f222e.svg",
     "static/media/radio.svg": "./static/media/radio.a8976f7cd2094465a9e60270572060bb.svg",
-    "main.9a62198e.css.map": "./static/css/main.9a62198e.css.map",
-    "main.980357ea.js.map": "./static/js/main.980357ea.js.map",
-    "448.2cb2cbcf.chunk.js.map": "./static/js/448.2cb2cbcf.chunk.js.map"
+    "main.46751f90.css.map": "./static/css/main.46751f90.css.map",
+    "main.55596032.js.map": "./static/js/main.55596032.js.map",
+    "448.94097709.chunk.js.map": "./static/js/448.94097709.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.9a62198e.css",
-    "static/js/main.980357ea.js"
+    "static/css/main.46751f90.css",
+    "static/js/main.55596032.js"
   ]
 }
