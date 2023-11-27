@@ -75,6 +75,21 @@ function aggregateData (
   const xLabel =
     visualization.group.label !== undefined ? visualization.group.label : visualization.group.column
 
+  const anyAddZeroes = visualization.values.some((value) => value.addZeroes === true)
+  if (anyAddZeroes && xSortable != null) {
+    for (const [uniqueValue, sortby] of Object.entries(xSortable)) {
+      aggregate[uniqueValue] = {
+        sortBy: sortby,
+        rowIds: {},
+        xLabel,
+        xValue: uniqueValue,
+        values: {},
+        secondAxis: false,
+        tickerFormat: 'default'
+      }
+    }
+  }
+
   for (const value of visualization.values) {
     // loop over all y values
 
@@ -91,21 +106,6 @@ function aggregateData (
     // if missing values should be treated as zero, we need to add the missing values after knowing all groups
     const addZeroes = value.addZeroes ?? false
     const groupSummary: Record<string, { n: number, sum: number }> = {}
-
-    // if addZeroes, prefill with all possible values
-    if (addZeroes && xSortable != null) {
-      for (const [uniqueValue, sortby] of Object.entries(xSortable)) {
-        aggregate[uniqueValue] = {
-          sortBy: sortby,
-          rowIds: {},
-          xLabel,
-          xValue: uniqueValue,
-          values: {},
-          secondAxis: value.secondAxis,
-          tickerFormat
-        }
-      }
-    }
 
     for (let i = 0; i < rowIds.length; i++) {
       // loop over rows of table

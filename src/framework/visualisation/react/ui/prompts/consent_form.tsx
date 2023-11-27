@@ -179,7 +179,7 @@ export const ConsentForm = (props: Props): JSX.Element => {
         <BodyLarge text={description} />
       </div>
       <div className='flex flex-col gap-16 w-full'>
-        <div className='grid gap-8 max-w-full'>
+        <div className='grid gap-4 md:gap-8 max-w-full'>
           {tables.map((table) => {
             return (
               <TableContainer

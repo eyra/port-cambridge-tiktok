@@ -68,7 +68,7 @@ export const Figure = ({
       <div key={table.id} className=' w-full overflow-auto'>
         <div className='flex flex-col '>
           <div
-            className='relative z-50 flex w-full pr-1 pb-2 min-w-[500px] '
+            className='relative z-50 flex w-full pr-1  min-w-[500px]'
             style={{ flex: `1 1 ${minHeight}`, minHeight }}
           >
             <RenderVisualization

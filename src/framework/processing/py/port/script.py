@@ -268,15 +268,20 @@ def extract_videos_viewed(data):
         props.PropsUIChartVisualization(
             title=props.Translatable(
                 {
-                    "en": "Number of videos watched for every hour of the day",
-                    "nl": "Aantal videos bekeken per uur van de dag",
+                    "en": "Average number of videos watched per hour of the day",
+                    "nl": "Gemiddeld aantal videos bekeken per uur van de dag",
                 }
             ),
             type="bar",
-            group=props.PropsUIChartGroup(column="Date", dateFormat="hour_cycle"),
+            group=props.PropsUIChartGroup(
+                column="Date", label="Hour of the day", dateFormat="hour_cycle"
+            ),
             values=[
                 props.PropsUIChartValue(
-                    column="Videos", aggregate="sum", addZeroes=True
+                    column="Videos",
+                    label="Average nr. of videos",
+                    aggregate="mean",
+                    addZeroes=True,
                 )
             ],
         )
@@ -354,19 +359,27 @@ def extract_comments_and_likes(data):
         props.PropsUIChartVisualization(
             title=props.Translatable(
                 {
-                    "en": "Number of comments and likes for every hour of the day",
-                    "nl": "Aantal comments en likes per uur van de dag",
+                    "en": "Average number of comments and likes for every hour of the day",
+                    "nl": "Gemiddeld aantal comments en likes per uur van de dag",
                 }
             ),
             type="bar",
-            group=props.PropsUIChartGroup(column="Date", dateFormat="hour_cycle"),
+            group=props.PropsUIChartGroup(
+                column="Date", label="Hour of the day", dateFormat="hour_cycle"
+            ),
             values=[
                 props.PropsUIChartValue(
-                    label="Comments and likes",
-                    column="Date",
-                    aggregate="count",
+                    label="Average nr. of comments",
+                    column="Comment posts",
+                    aggregate="mean",
                     addZeroes=True,
-                )
+                ),
+                props.PropsUIChartValue(
+                    label="Average nr. of posts",
+                    column="Likes given",
+                    aggregate="mean",
+                    addZeroes=True,
+                ),
             ],
         )
     ]
@@ -406,7 +419,9 @@ def extract_session_info(data):
                 }
             ),
             type="line",
-            group=props.PropsUIChartGroup(column="Start", dateFormat="auto"),
+            group=props.PropsUIChartGroup(
+                column="Start", label="Date", dateFormat="auto"
+            ),
             values=[
                 props.PropsUIChartValue(
                     label="Nr. of minutes",
