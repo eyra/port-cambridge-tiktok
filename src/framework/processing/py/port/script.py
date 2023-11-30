@@ -494,6 +494,8 @@ def extract_videos_liked(data):
         "tiktok_videos_liked",
         props.Translatable({"en": "Videos liked", "nl": "Gelikete videos"}),
         pd.DataFrame(table),
+        None,
+        None
     )
 
 
