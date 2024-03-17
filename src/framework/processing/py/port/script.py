@@ -13,7 +13,7 @@ from contextlib import suppress
 # TikTok file processing #
 ##########################
 
-now = datetime.datetime.utcnow()
+now = datetime.datetime.now(datetime.timezone.utc)
 
 datetime_format = "%Y-%m-%d %H:%M:%S"
 
